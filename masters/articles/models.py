@@ -23,7 +23,7 @@ class GleanerCrawler(Spider):
 	articles = []
 
 	def follow(self, link):
-		if link.url.endswith("#more") or link.url.endswith("#disqus_thread"):
+		if re.search("\#[a-z_0-9]+$",link.url): # ignore hashed locations
 			return False
 
 		if "article.php" in link.url:
@@ -45,7 +45,7 @@ class GleanerCrawler(Spider):
 				title = plaintext(titles[0].source)
 				body = plaintext(bodies[0].source)
 
-				print "[II] Creating article: %s from %s" % (title, link.url)
+				print "[II]  + Creating article: %s from %s" % (title, link.url)
 				article = Article.objects.get_or_create(title=title, body=body, url=link.url)
 				self.articles.append(article)
 		else:
@@ -55,7 +55,7 @@ class GleanerCrawler(Spider):
 		print "[II] Starting crawler"
 		while not self.done or self.parsed < limit:
 			self.crawl(method=BREADTH, cached=False, throttle=5, delay=5)
-			return self.articles
+		return self.articles
 
 
 
