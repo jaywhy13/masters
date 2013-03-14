@@ -1,0 +1,46 @@
+# ignore the local settings file
+settings_local.py
+
+# ignore the test sqlite database
+storage.db
+
+# misc ignores
+*.sublime*
+*.py[co~]
+*.*~
+*.*#
+
+# Packages
+*.egg
+*.egg-info
+dist
+build
+eggs
+parts
+bin
+include
+lib
+var
+sdist
+develop-eggs
+.installed.cfg
+
+# Installer logs
+pip-log.txt
+
+# Unit test / coverage reports
+.coverage
+.tox
+
+#Translations
+*.mo
+
+#Mr Developer
+.mr.developer.cfg
+
+uploads
+static_root
+
+migrations
+local
+logs/
