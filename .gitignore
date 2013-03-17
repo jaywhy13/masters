@@ -2,7 +2,7 @@
 settings_local.py
 
 # ignore the test sqlite database
-storage.db
+*.db
 
 # misc ignores
 *.sublime*
