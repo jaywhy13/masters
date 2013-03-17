@@ -1,0 +1,25 @@
+<html>
+	<head>
+		<title>News Crawler</title>
+		{% load socketio_tags %}
+		{% socketio %}
+		<script>
+		var socket = new io.Socket();
+		socket.connect();
+		socket.on('connect', function(){
+			console.log("Connected to server");
+			socket.subscribe("articles");
+		});
+
+		socket.on('message', function(data){
+			console.log("Got data!");
+			console.log(data);
+		});
+		</script>
+	</head>
+	<body>
+
+
+
+	</body>
+</html>
