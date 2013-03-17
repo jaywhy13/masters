@@ -47,13 +47,17 @@ class Gazetteer(models.Model):
 			title = article.title.lower()
 			body = article.body.lower()
 			for location in locations:
-				name = location.name.lower()
+				name = location.name.strip().lower()
+				if not name:  # ignore blank names
+					continue
+
 				# search for a name in the title...
 				position = title.find(name)
 				while position > -1:
 					(article_reference, created) = ArticleReference.objects.get_or_create(article=article, 
 						gazetteer=location, position=position, location="title")
-					print "[II] Found refence to %s in title of %s" % (name, title)
+					if created:
+						print "[II] Found refence to %s in title of %s" % (name, title)
 					position = title.find(name, position+1)
 				
 				# search for a name in the body..
@@ -61,14 +65,15 @@ class Gazetteer(models.Model):
 				while position > -1:
 					(article_reference, created) = ArticleReference.objects.get_or_create(article=article, 
 						gazetteer=location, position=position, location="body")
-					print "[II] Found refence to %s in body of %s" % (name, title)
+					if created:
+						print "[II] Found refence to %s in body of %s" % (name, title)
 					position = body.find(name, position+1)
 
 # Create your models here.
 class Article(models.Model):
 	title = models.CharField(max_length=255)
 	body = models.TextField()
-	raw = models.TextField()
+	raw = models.TextField(blank=True, null=True)
 	date = models.DateTimeField(blank=True, null=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	url = models.URLField()
