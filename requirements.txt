@@ -1,2 +1,15 @@
-django==1.4.1
-pattern
+BeautifulSoup==3.2.1
+Django==1.4.1
+Pattern==2.5
+South==0.7.6
+django-appconf==0.6
+django-extensions==1.1.1
+-e git+git@github.com:jaywhy13/django-socketio.git@530d8f81e3fd2a78740a1ba68522b6ea498b8d14#egg=django_socketio-dev
+gevent==0.13.8
+gevent-socketio==0.2.1
+gevent-websocket==0.3.6
+greenlet==0.4.0
+python-memcached==1.48
+six==1.2.0
+sphinx-me==0.1.2
+wsgiref==0.1.2
