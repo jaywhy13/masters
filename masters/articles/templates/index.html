@@ -1,6 +1,10 @@
 <html>
 	<head>
 		<title>News Crawler</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<link href="/static/css/bootstrap.min.css" rel="stylesheet" media="screen"/>
+		<link href="/static/css/main.css" rel="stylesheet"/>
+
 		{% load socketio_tags %}
 		{% socketio %}
 		<script>
@@ -12,14 +16,161 @@
 		});
 
 		socket.on('message', function(data){
-			console.log("Got data!");
-			console.log(data);
+			processServerData(data);
 		});
 		</script>
 	</head>
 	<body>
 
+	<div class="container">
+		<div class="navbar">
+			<div class="navbar-inner">
+			    <a class="brand" href="#">Crawler Hub</a>
+			    <ul class="nav">
+					<li class="active"><a href="#">Home</a></li>
+					<li><a href="#">Link</a></li>
+			    </ul>
+			</div>
+		</div>
+		<div class="row">
+			<div class="span4 pull-right controls">
+				<!--<a class="btn pull-right btn-primary review-references">Review References</a>-->
+			</div>
+		</div>
+		<div class="next-article row"></div>
+	</div>
 
 
+
+	<script type="text/javascript" src="/static/js/jquery.min.js"></script>
+	<script type="text/javascript" src="/static/js/bootstrap.min.js"></script>
+	<script type="text/javascript">
+	$(document).ready(function(){
+		window.setTimeout("nextArticle()", 1200);
+	});
+
+	/**
+	 * Called when the server send data through the socket
+	 */
+	function processServerData(data){
+		console.log("Processing data...");
+		console.log(data);
+		var action = data["action"];
+		if(action == "next-article"){
+			// We just go information for the next article to review
+			articleReferences = {}; // clear out our listing
+			var url = data["url"];
+			var id = data["id"];
+			articleId = id; // update the current article id...
+			// Load the article...
+			$(".next-article").load(url);
+		} 
+		else if(action == "review-references"){
+			var references = data["references"];
+			if(references.length == 0){
+				$(".article-references").html("No references to review");
+			} else{
+				window.setTimeout("$('.article-references').html('')", 300);
+				for(var i = 0; i < references.length; i++){
+					var reference = references[i];
+					var referenceId = reference["id"];
+					var referenceUrl = reference["url"];
+					articleReferences[referenceId] = reference;
+					window.setTimeout("loadReference(" + referenceId + ")", (i+1) * 600);
+				}
+			}
+		}
+	}
+
+	function loadReference(id){
+		var setupButtons = function(){
+			console.log("Setting up buttons for ref=" + id);
+			$("#confirm-reference-" + id).click(function(){
+				$(this).addClass("btn-warning");
+				confirmReference(id);
+			});
+
+			$("#remove-reference-" + id).click(function(){
+				$(this).addClass("btn-warning");
+				removeReference(id);
+			});
+		};
+		var reference = articleReferences[id];
+		var url = reference["url"];
+		$("<div class='article-reference'>").load(url, setupButtons).appendTo(".article-references").fadeIn("slow");
+	}
+
+	function confirmReference(id){
+		var reference = articleReferences[id];
+		if(reference != null){
+			var confirmUrl = reference["confirmUrl"];
+			console.log("Confirming reference: " + confirmUrl);
+			$.get(confirmUrl, function(data){
+				if(data == "success"){
+					$("#article-reference-" + id).css("opacity","0.5");
+					reference["status"] = "confirmed";
+					articleReferences[id] = reference;
+					loadArticleIfReviewed();
+				}
+			});
+		} else {
+			alert("Reference does not exist!");
+		}
+	}
+
+
+	function removeReference(id){
+		var reference = articleReferences[id];
+		if(reference != null){
+			var removeUrl = reference["removeUrl"];
+			console.log("Removing reference: " + removeUrl);
+			$.get(removeUrl, function(data){
+				if(data == "success"){
+					$("#article-reference-" + id).css("opacity", "0.5");
+					reference["status"] = "removed";
+					articleReferences[id] = reference;
+					loadArticleIfReviewed();
+				}
+			});
+		} else {
+			alert("Reference does not exist!");
+		}
+	}
+
+	/**
+	 * Loads another article if we have reviewed everything here...
+	 */ 
+	function loadArticleIfReviewed(){
+		for(var referenceId in articleReferences){
+			var reference = articleReferences[referenceId];
+			if(reference["status"] == null){
+				console.log("Reference with id " + reference["id"] + " does not have a status, cannot load next article");
+				return; 
+			}
+		}
+		nextArticle(); // Load the next article
+	}
+
+
+
+
+	var articleId = 0;
+	var articleReferences = {};
+	/**
+	 * Asks the server for the next article
+	 */
+	function nextArticle(){
+		$(".next-article").html("Loading...");
+		console.log("Asking for another article...");
+		var ctx = {'action' : 'next-article'};
+		if(articleId > 0){
+			// Close the current article...
+			socket.send({'action' : 'close-article', 'id':articleId});
+			ctx['id'] = articleId;
+		}
+		socket.send(ctx);
+	}
+
+	</script>
 	</body>
 </html>

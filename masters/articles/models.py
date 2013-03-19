@@ -12,7 +12,7 @@ import os
 class Gazetteer(models.Model):
 	name = models.CharField(max_length=255)
 	parish = models.CharField(max_length=255, blank=True, null=True)
-	level = models.PositiveIntegerField()\
+	level = models.PositiveIntegerField()
 
 	def __unicode__(str):
 		return self.name
@@ -38,12 +38,14 @@ class Gazetteer(models.Model):
 	def find_references(articles=None):
 		""" Searches articles for references to Gazetteer entries and return article references
 		""" 
+		article_references = []
 		if not articles:
 			articles = Article.objects.all()
 		
 		locations = Gazetteer.objects.all()
 		
 		for article in articles:
+			print "[II] Searching for references in %s" % article
 			title = article.title.lower()
 			body = article.body.lower()
 			for location in locations:
@@ -59,6 +61,7 @@ class Gazetteer(models.Model):
 					if created:
 						print "[II] Found refence to %s in title of %s" % (name, title)
 					position = title.find(name, position+1)
+					article_references.append(article_reference)
 				
 				# search for a name in the body..
 				position = body.find(name)
@@ -68,6 +71,9 @@ class Gazetteer(models.Model):
 					if created:
 						print "[II] Found refence to %s in body of %s" % (name, title)
 					position = body.find(name, position+1)
+					article_references.append(article_reference)
+		print "[II] Found a total of %s article references" % len(article_references)
+		return article_references
 
 # Create your models here.
 class Article(models.Model):
@@ -77,9 +83,14 @@ class Article(models.Model):
 	date = models.DateTimeField(blank=True, null=True)
 	created_at = models.DateTimeField(auto_now_add=True)
 	url = models.URLField()
+	reviewed = models.BooleanField(default=False)
 
 	def __unicode__(self):
 		return self.title
+
+	def close(self):
+		self.reviewed = True
+		self.save()
 
 	@staticmethod
 	def crawl_gleaner(limit=10):
@@ -98,6 +109,25 @@ class ArticleReference(models.Model):
 	location = models.CharField(max_length=10, choices=LOCATIONS)
 	position = models.PositiveIntegerField()
 	confirmed = models.BooleanField(default=False)
+
+	def __unicode__(self):
+		return "%s found at index %s in %s" % (self.gazetteer.name, self.position, self.location)
+
+	@property
+	def description(self):
+		""" Returns surrounding text to go along side the reference to provide some context
+		"""
+		name = self.gazetteer.name
+		html = "<b class='gazetteer-reference'>" + name + "</b>"
+		if self.location == "title":
+			return title[:self.position] + html + title[self.position + len(name):]
+		else:
+			body = self.article.body
+			start_index = max(0, self.position - 100) # start a couple words before...
+			start_dots = "... " if start_index else ""
+			end_index = min(len(body), (self.position + len(name) + 100))
+			end_dots = " ..." if end_index < len(body) else ""
+			return start_dots + body[start_index:self.position] + html + body[self.position + len(name) : end_index] + end_dots
 
 class GleanerCrawler(Spider):
 
