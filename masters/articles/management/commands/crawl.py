@@ -14,6 +14,6 @@ class Command(BaseCommand):
     	""" 
     	This loads in some test data for us
     	"""
-    	Article.crawl_gleaner(limit=1000)
+    	Article.crawl_gleaner(limit=10000)
 
 

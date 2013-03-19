@@ -200,12 +200,12 @@ class GleanerCrawler(Spider):
 			#print "[WW] No source for: %s" % link.url
 			pass
 
-	def run_crawl(self, limit=10):
+	def run_crawl(self, limit=10000):
 		print "[II] Starting crawler (will stop after %s article(s))" % limit
 		while not self.done or len(self.articles) < limit:
 			#print "[II] Crawling again %s" % self.visited
 			try:
-				self.crawl(method=DEPTH, cached=False, throttle=5, delay=5)
+				self.crawl(method=DEPTH, cached=False, throttle=10, delay=15)
 			except Exception as e:
 				print "[EE] Error occurred: %s" % e
 		print "Saved %s article(s)" % len(self.articles)
