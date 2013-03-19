@@ -1,0 +1,18 @@
+BODY {
+	margin-top:20px;
+}
+
+.logo {
+	margin-top:-15px;	
+	margin-left:-5px;
+	position: absolute;
+}
+
+.navbar .brand {
+	padding-left:85px;
+}
+
+.icon {
+	padding:4px;
+}
+
