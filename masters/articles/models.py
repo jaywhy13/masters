@@ -6,6 +6,7 @@ from pattern.web import Spider, BREADTH, DEPTH, plaintext, Element
 from django.contrib.gis.utils import LayerMapping
 from django.contrib.gis.gdal import DataSource		
 from django.contrib.gis.geos import GEOSGeometry
+import datetime
 import re
 import os
 
@@ -167,7 +168,8 @@ class GleanerCrawler(Spider):
 		return result
 	
 	def visit(self, link, source=None):
-		print "[II] Visited %s COMING FROM %s" % (link.url, link.referrer)
+		time = datetime.datetime.today().strftime("%H:%M")
+		print "[II] Visited %s at %s COMING FROM %s" % (link.url, time, link.referrer)
 		if source:
 			# Find the article title and body...
 			e = Element(source)
@@ -188,9 +190,9 @@ class GleanerCrawler(Spider):
 						# Also save the raw source
 						article.raw = source
 						article.save()
-						print "[II]  + Article created for: %s from %s (%s articles now)" % (title, link.url, count)
+						print "[II]  + Article created for: %s from %s (%s articles now, time is %s)" % (title, link.url, count, time)
 					else:
-						print "[II]  - Article %s already exists (%s articles now)" % (title, count)
+						print "[II]  - Article %s already exists (%s articles now, time is %s)" % (title, count, time)
 			if not article_found:
 				#print "[WW] No article on this page: %s" % link.url
 				pass
@@ -202,7 +204,10 @@ class GleanerCrawler(Spider):
 		print "[II] Starting crawler (will stop after %s article(s))" % limit
 		while not self.done or len(self.articles) < limit:
 			#print "[II] Crawling again %s" % self.visited
-			self.crawl(method=DEPTH, cached=False, throttle=5, delay=5)
+			try:
+				self.crawl(method=DEPTH, cached=False, throttle=5, delay=5)
+			except Exception as e:
+				print "[EE] Error occurred: %s" % e
 		print "Saved %s article(s)" % len(self.articles)
 		return self.articles
 
