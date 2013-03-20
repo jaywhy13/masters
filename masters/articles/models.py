@@ -9,6 +9,7 @@ from django.contrib.gis.geos import GEOSGeometry
 import datetime
 import re
 import os
+from django.core.cache import cache
 
 class Gazetteer(models.Model):
 	name = models.CharField(max_length=255)
@@ -96,9 +97,27 @@ class Article(models.Model):
 	@staticmethod
 	def crawl_gleaner(limit=10):
 		links = ["http://www.jamaica-gleaner.com"]
+		# add the last visited url
+		last_url = cache.get("gleaner_referrer", None)
+		if last_url and last_url != links[0]:
+			print "[II] Will revisit %s first" % last_url
+			links = [last_url] + links
 		domains = ["jamaica-gleaner.com"]
 		spider = GleanerCrawler(links=links, domains=domains)
 		spider.run_crawl(limit=limit)
+
+	@staticmethod
+	def crawl_observer(limit=10):
+		links = ["http://www.jamaicaobserver.com"]
+		# add the last visited url
+		last_url = cache.get("observer_referrer", None)
+		if last_url and last_url != links[0]:
+			print "[II] Will revisit %s first" % last_url
+			links = [last_url] + links
+		domains = ["jamaicaobserver.com"] 
+		spider = ObserverCrawler(links=links, domains=domains)
+		spider.run_crawl(limit=limit)
+	
 
 class ArticleReference(models.Model):
 	LOCATIONS = (
@@ -131,7 +150,7 @@ class ArticleReference(models.Model):
 			return start_dots + body[start_index:self.position] + html + body[self.position + len(name) : end_index] + end_dots
 
 class GleanerCrawler(Spider):
-
+	site = "gleaner"
 	limit = 10
 	parsed = 0
 	articles = []
@@ -170,6 +189,8 @@ class GleanerCrawler(Spider):
 	def visit(self, link, source=None):
 		time = datetime.datetime.today().strftime("%H:%M")
 		print "[II] Visited %s at %s COMING FROM %s" % (link.url, time, link.referrer)
+		cache.set("%s_referrer" % self.site, link.referrer) 
+
 		if source:
 			# Find the article title and body...
 			e = Element(source)
@@ -203,6 +224,9 @@ class GleanerCrawler(Spider):
 	def run_crawl(self, limit=10000):
 		print "[II] Starting crawler (will stop after %s article(s))" % limit
 		while not self.done or len(self.articles) < limit:
+			if self.done:
+				print "[II] Quiting... sorry.. all done"
+				return
 			#print "[II] Crawling again %s" % self.visited
 			try:
 				self.crawl(method=DEPTH, cached=False, throttle=10, delay=15)
@@ -211,6 +235,35 @@ class GleanerCrawler(Spider):
 		print "Saved %s article(s)" % len(self.articles)
 		return self.articles
 
+class ObserverCrawler(GleanerCrawler):
+	site = "observer"
+	limit = 10
+	parsed = 0
+	articles = []
+	base_url  = ""
+	article_classes = [
+		# Article classes... header class, body class
+		("title", "div#story_body"),
+	]
+
+	def is_article(self, link):
+		if "/news/" in link.url and not link.url.endswith("/news/"):
+			return True
+		return False
+
+	def priority(self, link, method=DEPTH):
+		p = 0.0
+		if self.is_article(link):
+			p = 1.0
+		elif not link.url.endswith("/news/") and "/news/" in link.url:
+			p = 0.7
+		return p
+
+
+	def follow(self, link):
+		result = link.url.startswith("http://www.jamaicaobserver.com")
+		return result
+	
 
 #@receiver(post_save)
 def article_created(sender, instance, **kwargs):

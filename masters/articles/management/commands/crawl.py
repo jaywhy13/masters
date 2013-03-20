@@ -4,6 +4,7 @@ from datetime import timedelta, date, datetime
 from django.conf import settings
 from django.contrib.auth.models import Group, Permission
 import os
+import threading
 from masters.articles.models import *
 
 class Command(BaseCommand):
@@ -14,6 +15,8 @@ class Command(BaseCommand):
     	""" 
     	This loads in some test data for us
     	"""
-    	Article.crawl_gleaner(limit=10000)
-
-
+    	site = args[0]
+    	if site == "gleaner":
+    		Article.crawl_gleaner(limit=10000)
+    	elif site == "observer":
+    		Article.crawl_observer(limit=10000)
