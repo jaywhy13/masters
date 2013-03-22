@@ -1,8 +1,8 @@
-from django.db import models
+from django.db import models, transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django_socketio import broadcast, broadcast_channel, NoSocket
-from pattern.web import Spider, BREADTH, DEPTH, plaintext, Element
+from pattern.web import Spider, BREADTH, DEPTH, plaintext, Element, Link, URL
 from django.contrib.gis.utils import LayerMapping
 from django.contrib.gis.gdal import DataSource		
 from django.contrib.gis.geos import GEOSGeometry
@@ -77,6 +77,19 @@ class Gazetteer(models.Model):
 		print "[II] Found a total of %s article references" % len(article_references)
 		return article_references
 
+
+import unicodedata, re
+
+all_chars = (unichr(i) for i in xrange(0x110000))
+control_chars = ''.join(c for c in all_chars if unicodedata.category(c) == 'Cc')
+# or equivalently and much more efficiently
+control_chars = ''.join(map(unichr, range(0,32) + range(127,160)))
+
+control_char_re = re.compile('[%s]' % re.escape(control_chars))
+
+def remove_control_chars(s):
+    return control_char_re.sub('', s)
+
 # Create your models here.
 class Article(models.Model):
 	title = models.CharField(max_length=255)
@@ -89,6 +102,20 @@ class Article(models.Model):
 
 	def __unicode__(self):
 		return self.title
+
+	@staticmethod
+	def save_gleaner_articles(start=15, stop=4500):
+		l = range(start, stop)
+		l.reverse()
+		gc = GleanerCrawler()
+		for i in l:
+			link = Link(url="http://jamaica-gleaner.com/latest/article.php?id=%s" % i)
+			url = URL(link.url)
+			source = unicode(remove_control_chars(url.download()))
+			try:
+				gc.visit(link, source)
+			except Exception as e:
+				print e
 
 	def close(self):
 		self.reviewed = True
@@ -185,7 +212,7 @@ class GleanerCrawler(Spider):
 	def follow(self, link):
 		result = link.url.startswith("http://jamaica-gleaner") or link.url.startswith("http://www.jamaica-gleaner")
 		return result
-	
+
 	def visit(self, link, source=None):
 		time = datetime.datetime.today().strftime("%H:%M")
 		print "[II] Visited %s at %s COMING FROM %s" % (link.url, time, link.referrer)
@@ -235,6 +262,8 @@ class GleanerCrawler(Spider):
 		print "Saved %s article(s)" % len(self.articles)
 		return self.articles
 
+
+
 class ObserverCrawler(GleanerCrawler):
 	site = "observer"
 	limit = 10
@@ -280,3 +309,6 @@ def article_created(sender, instance, **kwargs):
 	except NoSocket as e:
 		print "No sockets to send broadcast to :( ... %s" % e
 	
+
+
+
