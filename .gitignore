@@ -44,3 +44,5 @@ static_root
 migrations
 local
 logs/
+*.*~
+~$*.*
