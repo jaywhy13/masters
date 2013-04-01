@@ -16,3 +16,30 @@ BODY {
 	padding:4px;
 }
 
+
+.article-references-control {
+	text-align:right;
+}
+
+.article-reference-text {
+	float:right;
+}
+
+.article-reference-buttons {
+	float:right;
+}
+
+.article-reference-container {
+	padding:5px;
+	border-left-style:solid;
+	border-left-width:3px;
+	border-left-color:#fff;
+	padding-left:12px;
+}
+
+.article-reference-container.highlighted, .article-reference-container:hover {
+	border-left-color:#08C;
+	border-left-width:3px;
+	border-left-style:solid;
+	padding-left:12px;
+}
