@@ -37,9 +37,8 @@
 				<!--<a class="btn pull-right btn-primary review-references">Review References</a>-->
 			</div>
 		</div>
+		<div class="article-count row"></div>
 		<div class="next-article row"></div>
-	</div>
-
 
 
 	<script type="text/javascript" src="/static/js/jquery.min.js"></script>
@@ -61,9 +60,16 @@
 			articleReferences = {}; // clear out our listing
 			var url = data["url"];
 			var id = data["id"];
+			var previewUrl = data["previewUrl"];
 			articleId = id; // update the current article id...
 			// Load the article...
-			$(".next-article").load(url);
+			console.log("Loading article from: " + url);
+			$(".next-article").load(url, function(){
+				// Setup the link
+				$("a.article-link").click(function(){
+					showPreview(previewUrl);
+				});
+			});
 		} 
 		else if(action == "review-references"){
 			var references = data["references"];
@@ -75,14 +81,19 @@
 					var reference = references[i];
 					var referenceId = reference["id"];
 					var referenceUrl = reference["url"];
+					var contextReferenceUrl = reference["contextReferenceUrl"];
 					articleReferences[referenceId] = reference;
-					window.setTimeout("loadReference(" + referenceId + ")", (i+1) * 600);
+					window.setTimeout(("loadReference(" + referenceId + ",'" + contextReferenceUrl + "')"), (i+1) * 600);
+				}
+
+				if(references.length > 0){
+					highlightReference(references[0]["id"]);
 				}
 			}
 		}
 	}
 
-	function loadReference(id){
+	function loadReference(id, contextReferenceUrl){
 		var setupButtons = function(){
 			console.log("Setting up buttons for ref=" + id);
 			$("#confirm-reference-" + id).click(function(){
@@ -94,12 +105,19 @@
 				$(this).addClass("btn-warning");
 				removeReference(id);
 			});
+
+			$("#context-reference-" + id).click(function(){
+				showPreview(contextReferenceUrl);
+			});
 		};
 		var reference = articleReferences[id];
 		var url = reference["url"];
 		$("<div class='article-reference'>").load(url, setupButtons).appendTo(".article-references").fadeIn("slow");
 	}
 
+	/**
+	 * Confirms that a reference is valid
+	 */
 	function confirmReference(id){
 		var reference = articleReferences[id];
 		if(reference != null){
@@ -118,7 +136,9 @@
 		}
 	}
 
-
+	/**
+	 * Marks a reference as invalid
+	 */
 	function removeReference(id){
 		var reference = articleReferences[id];
 		if(reference != null){
@@ -155,7 +175,9 @@
 
 
 	var articleId = 0;
+	var highlightedReference = 0;
 	var articleReferences = {};
+	var articlesClosed = 0;
 	/**
 	 * Asks the server for the next article
 	 */
@@ -166,10 +188,70 @@
 		if(articleId > 0){
 			// Close the current article...
 			socket.send({'action' : 'close-article', 'id':articleId});
+			articlesClosed++;
 			ctx['id'] = articleId;
 		}
 		socket.send(ctx);
 	}
+
+	/**
+	* Shows a preview of the url in a preview window
+	*/
+	function showPreview(url){
+		console.log("Loading preview for: " + url);
+		var previewDiv = $("<div class='preview-article container well'></div>");
+		previewDiv.appendTo("body");
+		previewDiv.html("Loading preview...");
+		previewDiv.css("position", "absolute");
+		previewDiv.css("left", 100);
+		previewDiv.css("top", 200);
+		previewDiv.css("width", 500);
+		previewDiv.css("overflow", "auto");
+		$(".preview-article").load(url, function(){
+			var closeLink = $("<a class='btn'>Close</a>");
+			closeLink.click(function(){
+				previewDiv.remove();
+			});
+			closeLink.appendTo(previewDiv);
+		});
+	}
+
+	function refreshStatistics(){
+		$(".article-count").html("Refreshing...");
+		window.setTimeout('$(".article-count").load("/masters/statistics");', 1500);
+		
+	}
+
+	function highlightReference(id){
+		console.log("Highlighting reference: " + id);
+		$(".article-reference-container").removeClass("highlighted");
+		$("#article-reference-" + id).addClass("highlighted");
+		highlightedReference = id;
+	}
+
+	function highlightNextReference(){
+		var references = $("#article-reference-" + highlightedReference).parent().siblings();
+		if(references.length > 0){
+			var nextReference = $(reference[0]).find(".article-reference-container")[0];
+			var id = nextReference.id;
+			var pieces = id.split("-");
+			highlightReference(pieces[pieces.length-1]);
+		}
+	}
+
+	window.setInterval("refreshStatistics()", 10000);
+
+	$(document).keypress(function(event){
+		if(highlightedReference != 0){
+			if(event.which == 121){ // yes
+				confirmReference(highlightedReference);
+				highlightNextReference();
+			} else if(event.which == 110){ // no
+				removeReference(highlightedReference);
+				highlightNextReference();
+			}
+		}
+	});
 
 	</script>
 	</body>

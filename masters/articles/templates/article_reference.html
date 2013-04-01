@@ -1,11 +1,15 @@
-<div class="row article-reference" id="article-reference-{{ article_reference.pk }}">
-	<div class="span9 article-reference-description">
+<div class="row-fluid article-reference-container" id="article-reference-{{ article_reference.pk }}">
+	<div class="span10 article-reference-description">
 	{{ article_reference.description|safe }}
 	</br>
-	<div class="span5 article-reference-controls pull-right">
-		Is this refence correct?
-		<a class="btn btn-normal" id="confirm-reference-{{ article_reference.pk }}">Yes</a>
-		<a class="btn btn-normal" id="remove-reference-{{ article_reference.pk }}">No</a>
+	<div class="span6 article-reference-controls pull-right">
+		<span class="article-reference-text">Is this refence to <b>{{  article_reference.gazetteer }}</b> correct?</span>
+		<div class="article-reference-buttons">
+			<a class="btn btn-normal" id="confirm-reference-{{ article_reference.pk }}">Yes</a>
+			<a class="btn btn-normal" id="remove-reference-{{ article_reference.pk }}">No</a>
+			<a class="btn btn-normal" id="context-reference-{{ article_reference.pk }}">View Context</a>
+		</div>
 	</div>
 	</div>
 </div>
+<hr/>
