@@ -34,6 +34,7 @@ def handle_message(request, socket, context, message):
 				'title' : article.title,
 				'url' : reverse('review-article', kwargs={'id': article.pk}),
 				'closeUrl' : reverse('close-article', kwargs={'id': article.pk}),
+				'previewUrl' : reverse('preview-article', kwargs={'id' : article.pk}),
 			}
 			print "Sending article to client: %s" % article.title
 			socket.send(ctx)
@@ -41,11 +42,12 @@ def handle_message(request, socket, context, message):
 			print "Storing the last id as: %s" % article.pk
 
 			# now find the references...
-			article_references = Gazetteer.find_references(articles=[article])
+			article_references = article.article_references.all()
 			references = [ {'id' : article_reference.pk, 
 				'url' : reverse('review-reference', kwargs={'id':article_reference.pk }),
-				'confirmUrl' : reverse('confirm-reference', kwargs={'id':article_reference.pk }),
-				'removeUrl' : reverse('remove-reference', kwargs={'id':article_reference.pk }),
+				'confirmUrl' : reverse('confirm-reference', kwargs={'id' :article_reference.pk }),
+				'removeUrl' : reverse('remove-reference', kwargs={'id': article_reference.pk }),
+				'contextReferenceUrl' : reverse('reference-context', kwargs={'id' : article_reference.pk }),
 				} for article_reference in article_references ]
 			
 			ctx = {
