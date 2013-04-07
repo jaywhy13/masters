@@ -14,6 +14,171 @@ import datetime
 import re
 import os
 import nltk
+import numpy
+
+# Initial Weightings
+PARISH_WEIGHTING = 30
+COMMUNITY_WEIGHTING = 10
+# Scoring
+PARISH_PRESENT_WEIGHTING = 15
+COMMON_WEIGHTING = -10
+NOT_LOWER_CASED_WEIGHTING = 5
+NO_NEAR_PRONOUN_WEIGHTING = 10
+WITHIN_ONE_STDEV_WEIGHTING = 15
+NLTK_NE_TAG_WEIGHTING = 10
+PASS_MARK = 30
+
+class References:
+
+	references = []
+	occurrences = {} # occurrences of a particular gazetteer
+	centroid = None
+
+	def __init__(self, article_references=None):
+		self.references = []
+		self.occurrences = {}
+		self.centroid = None
+		self.std = 0
+
+		if article_references:
+			for article_reference in article_references:
+				self.add_reference(article_reference, False)
+			self.update_distances()
+	
+	def remove_failed_references(self):
+		final_references = []
+		for reference in self.references:
+			if reference.weighting >= PASS_MARK:
+				final_references.append(reference)
+			else:
+				print "[WW] - Removing failed reference: %s - %s\n\t: %s" % (reference, reference.weighting, reference.sentence)
+		self.references = final_references
+
+	def get_references_by_level(self, level):
+		""" Returns the references for a level
+		"""
+		return [ reference for reference in self.references if reference.gazetteer.level == level ]
+
+	def get_occurrences(self, reference):
+		""" Returns the number of occurrences of a particular gazetteer
+		"""
+		if type(reference) == Gazetteer:
+			pk = reference.pk
+		else:
+			pk = reference.gazetteer.pk
+		return self.occurrences.get(pk, 0)
+
+	def add_reference(self, reference, update_distance=True):
+		""" Adds a reference
+		"""
+		#print "[II]   Adding reference %s" % reference.reference
+		reference.references = self
+		self.references.append(reference)
+		reference.weighting = PARISH_WEIGHTING if reference.gazetteer.level == 1 else COMMUNITY_WEIGHTING
+		# Increase the occurrences
+		occurrences = self.occurrences.get(reference.gazetteer.pk, 0)
+		self.occurrences[reference.gazetteer.pk] = occurrences + 1
+		if update_distance:
+			self.update_distances()
+	
+	def get_references_for_gazetteer(self, gazetteer):
+		""" Returns all references to the given gazetteer
+		"""
+		return [ reference for reference in self.references if reference.gazetteer == gazetteer ]
+
+	def update_distances(self):
+		""" Updates the centroid and recalculates the distances to the centroid 
+			for each reference
+		"""
+		#print "[II]   Updating centroid...."
+		ids = [ reference.gazetteer.pk for reference in self.references ]
+
+		self.centroid = Gazetteer.objects.filter(pk__in=ids).collect().centroid
+		#print "[II]   Centroid updated to: %s" % self.centroid
+		# Update the distances on the reference objects
+		gazetteers = Gazetteer.objects.filter(pk__in=ids).distance(self.centroid)
+		distances = [ g.distance.km for g in gazetteers ]
+		# calculate the std and mean
+		array = numpy.array(distances)
+		self.std = array.std()
+		self.mean = array.mean()
+		for g in gazetteers:
+			references = self.get_references_for_gazetteer(g)
+			for reference in references:
+				#print "[II]   Updating distance of %s to %s km" % (reference.reference, g.distance.km)
+				reference.distance = g.distance.km
+				reference.deviation = abs(g.distance.km - self.std)
+
+	
+	def get_reference(self, article_reference):
+		""" Returns the reference to the article reference, None if it doesn't exist
+		"""
+		for reference in self.references:
+			if article_reference.article == reference.article and article_reference.sentence_number == reference.sentence_number and article_reference.position_in_sentence == reference.position_in_sentence and article_reference.location == reference.location:
+				return reference
+		return None
+	
+	def has_reference(self, article_reference):
+		""" Checks if we have a reference to an article reference
+		"""
+		return self.get_reference(article_reference) is not None
+
+	def is_reference_valid(self, article_reference):
+		""" Return whether the reference is marked as valid
+		"""
+		if self.has_reference(article_reference):
+			return self.get_reference(article_reference).is_valid()
+		return False
+	
+	def get_reference_count(self):
+		""" Get the number of references on this object
+		"""
+		count = 0
+		for reference in self.references:
+			count = count + 1
+		return count
+	
+	def score(self, article):
+		""" Returns the (precision, accuracy) tuple
+		"""
+		print "-" * 80
+		print "[II] Scoring article: %s ID=%s" % (article, article.pk)
+		article_references = article.article_references.all()
+		total_references = len([article_reference for article_reference in article_references if article_reference.valid ])
+		references_found = self.get_reference_count()
+		print "[II]  Article %s has %s confirmed references, search found %s references" % (article.title, total_references, references_found)
+		#print "[II]  Found references: "
+		#for reference in self.references:
+		#	print "\t%s" % reference
+		#print "[II]  Article references: "
+		#for article_reference in article_references:
+		#	print "\t%s" % article_reference
+
+		found = 0
+		correct = 0
+		for article_reference in article_references:
+			reference = self.get_reference(article_reference)
+			if reference:
+				if article_reference.valid:
+					found = found + 1
+				if article_reference.valid == self.is_reference_valid(article_reference):
+					correct = correct + 1
+				else:
+					print "[II]   - Incorrect reference identified: %s (scored %s) ... %s" % \
+												(reference, reference.weighting, reference.sentence)
+			else:
+				if article_reference.valid:
+					print "[WW]  Reference missing for: %s" % article_reference
+		
+		precision = found / float(total_references) if total_references > 0 else 0
+		accuracy = correct / float(references_found) if references_found > 0 else 0
+
+		print "[II] Score: Precision: %s, Accuracy: %s" % (precision, accuracy)
+		print "-" * 80
+		print
+
+		return (precision, accuracy)
+
 
 class Gazetteer(models.Model):
 	name = models.CharField(max_length=255)
@@ -21,6 +186,8 @@ class Gazetteer(models.Model):
 	level = models.PositiveIntegerField(default=3)
 	weighting = models.PositiveIntegerField(default=0)
 	point = models.PointField()
+
+	objects = models.GeoManager()
 
 	def __unicode__(self):
 		if self.parish:
@@ -61,6 +228,7 @@ class Gazetteer(models.Model):
 
 	# Use these to load in data for country, parish and community
 	# Gazetteer.objects.create(name='Jamaica', geom=GEOSGeometry('POINT (-77.5 18.25)'), level=0, weighting=80)
+
 
 
 	@staticmethod
@@ -165,7 +333,7 @@ class Gazetteer(models.Model):
 							(article_reference, created) = ArticleReference.objects.get_or_create(article=article, 
 								gazetteer=location, position=position, location="title")
 							if created:
-								print "[II] Found refence to %s in title of %s" % (name, title)
+								print "[II] Found reference to %s in title of %s" % (name, title)
 						position = title.find(name, position+1)
 						article_references.append(article_reference)
 					
@@ -176,7 +344,7 @@ class Gazetteer(models.Model):
 							(article_reference, created) = ArticleReference.objects.get_or_create(article=article, 
 								gazetteer=location, position=position, location="body")
 							if created:
-								print "[II] Found refence to %s in body of %s" % (name, title)
+								print "[II] Found reference to %s in body of %s" % (name, title)
 						position = body.find(name, position+1)
 						article_references.append(article_reference)
 			print "[II] Found a total of %s article references" % len(article_references)
@@ -184,7 +352,6 @@ class Gazetteer(models.Model):
 			stop = stop + amount
 			articles = None
 		return article_references
-
 
 import unicodedata, re
 
@@ -208,8 +375,98 @@ class Article(models.Model):
 	url = models.URLField()
 	reviewed = models.BooleanField(default=False)
 
+	@staticmethod
+	def extract_references(article):
+		""" This runs our algorithm to identify references to place names in the given articles
+		"""
+		print "=" * 80
+		print "[II] Extracting references from %s ... ID = %s" % (article, article.pk)
+		references = References()
+		# First, do a naive search for references...
+		for gazetteer in Gazetteer.objects.all():
+			name = gazetteer.name
+			level = gazetteer.level
+			weighting = gazetteer.weighting
+			point = gazetteer.point
+			# Search in the body...
+			for i in range(0, len(article.sentences)):
+				sentence = article.sentences[i]
+				position = ArticleReference.reference_in_sentence(name, sentence)
+				reference = ArticleReference(sentence_number=i, position_in_sentence=position, gazetteer=gazetteer, article=article, location="body", valid=True)
+				if position > -1:
+					references.add_reference(reference, False)
+		references.update_distances() # Update distances
+
+
+		# Add marks if parents are mentioned in the article
+		for reference in references.get_references_by_level(2): # loop over communities
+			if reference.is_parent_in_article():
+				reference.add_weight(PARISH_PRESENT_WEIGHTING)
+		
+		for reference in references.references:
+
+			if not reference.is_common():
+				#print "[II] + Common weighting passed for %s" % reference
+				reference.add_weight(COMMON_WEIGHTING)
+			else:
+				print "[II] - Common weighting FAILED for %s" % reference
+
+
+			if reference.is_cased_properly():
+				#print "[II] + Case test passed for %s" % reference
+				reference.add_weight(NOT_LOWER_CASED_WEIGHTING)
+			else:
+				print "[II] - Case test FAILED for %s" % reference
+
+			if reference.no_near_pronouns():
+				#print "[II] + No near pronouns passed for %s" % reference
+				reference.add_weight(NO_NEAR_PRONOUN_WEIGHTING)
+			else:
+				print "[II] - No near pronouns FAILED for %s" % reference
+
+			
+			if reference.within_one_std():
+				#print "[II] + One std test passed for %s" % reference
+				reference.add_weight(WITHIN_ONE_STDEV_WEIGHTING)
+			else:
+				print "[II] - One std test FAILED for %s" % reference
+
+			if reference.is_nltk_ne:
+				#print "[II] + NLTK NE test passed for %s" % reference
+				reference.add_weight(NLTK_NE_TAG_WEIGHTING)
+			else:
+				print "[II] - NLTK NE test FAILED for %s" % reference
+
+
+		references.remove_failed_references()
+
+		# Print the score
+		(precision, accuracy) = references.score(article)
+		#print "[II] Score for %s\n\tPrecision: %s, Score: %s" % (article.title, precision, accuracy)
+		return (precision, accuracy)
+
+	@staticmethod
+	def get_random_articles(amount=50):
+		""" Returns some articles that have not yet been reviewed
+		"""
+		articles = Article.objects.filter(reviewed=False)[:amount]
+		return articles
+
+	def has_valid_references(self):
+		if self.article_references.filter(valid=True):
+			return True
+		return False
+
 	def __unicode__(self):
 		return self.title
+
+	@property
+	def words(self):
+		all_words = []
+		sentence_count = len(self.sentences)
+		for sentence in range(sentence_count):
+			all_words.extend(self.get_sentence_words(sentence))
+		return all_words
 
 	@property
 	def sentences(self):
@@ -226,6 +483,26 @@ class Article(models.Model):
 
 	def get_sentence(self, sentence):
 		return self.sentences[sentence]
+	
+	def get_pos_words(self, sentence):
+		""" Returns a POS tagged sentence
+		"""
+		return nltk.pos_tag(self.get_sentence_words(sentence))
+	
+	def ne_chunked_sentence(self, sentence):
+		""" Returns the NE chunks for the sentence
+		"""
+		ne_chunks = nltk.ne_chunk(self.get_pos_words(sentence))
+		result = []
+		# Loop and extract
+		for ne_chunk in ne_chunks:
+			if hasattr(ne_chunk, 'node'):
+				node = ne_chunk.node
+				for (word, tag) in ne_chunk:
+					result.append((word, tag, node))
+			else:
+				result.append((ne_chunk[0], ne_chunk[1], None))
+		return result
 
 	@staticmethod
 	def save_gleaner_articles(start=15, stop=4500):
@@ -284,12 +561,18 @@ class ArticleReference(models.Model):
 	sentence_number = models.PositiveIntegerField(default=0)
 	position_in_sentence = models.PositiveIntegerField(default=0)
 
+	@staticmethod
+	def get_reference():
+		""" Gets a reviewed reference
+		"""
+		return ArticleReference.objects.filter(confirmed=True).latest('pk')
+
 	def get_words_after(self, amount=3):
 		""" Returns amoutn words after our reference word
 		"""
 		sentence_words = self.sentence_words
 		start = self.position_in_sentence + 1
-		end = start + amount
+		end = self.position_in_sentence + amount
 		return sentence_words[start:end]
 	
 	def get_words_before(self, amount=3):
@@ -297,7 +580,7 @@ class ArticleReference(models.Model):
 		""" 
 		sentence_words = self.sentence_words
 		start = self.position_in_sentence - amount
-		end = self.position_in_sentence - 1
+		end = self.position_in_sentence
 		return sentence_words[start:end]
 
 	@property
@@ -308,18 +591,62 @@ class ArticleReference(models.Model):
 		return nltk.word_tokenize(sentence)
 	
 	@property
+	def ne_sentence_words(self):
+		return self.article.ne_chunked_sentence(self.sentence_number)
+	
+	@property
 	def reference_words(self):
 		""" Returns the words in the reference (gazetteer)
 		"""
 		return nltk.word_tokenize(self.gazetteer.name)
 	
 	@property
+	def pos_reference_words(self):
+		return nltk.pos_tag(self.reference_words)
+
+	@property
+	def ne_reference_words(self):
+		""" Returns the NE chunks for the sentence
+		"""
+		ne_chunks = nltk.ne_chunk(self.pos_reference_words)
+		result = []
+		# Loop and extract
+		for ne_chunk in ne_chunks:
+			if hasattr(ne_chunk, 'node'):
+				node = ne_chunk.node
+				for (word, tag) in ne_chunk:
+					result.append((word, tag, node))
+			else:
+				result.append((ne_chunk[0], ne_chunk[1], None))
+		return result
+	
+	@property
 	def reference(self):
 		return self.gazetteer.name
 
 	@property
+	def is_nltk_ne(self):
+		""" Returns true if this is tagged a named entity by NLTK
+		"""
+		(word, tag, ne) = self.ne_sentence_words[self.position_in_sentence]
+		return ne is not None
+	
+	@property
+	def parent(self):
+		parish = Gazetteer.objects.filter(level=1, name=self.gazetteer.parish)
+		return parish
+
+	@property
+	def parent_in_article(self):
+		return self.article.article_references.filter(gazetteer=self.parent)
+
+	@property
 	def reference_length(self):
 		return len(self.gazetteer.name)
+
+	@property
+	def reference_word_count(self):
+		return len(self.reference_words)
 	
 	@property
 	def sentence(self):
@@ -383,15 +710,81 @@ class ArticleReference(models.Model):
 				incorrect_references.append(reference)
 		print "%s incorrect references found" % len(incorrect_references)
 		return incorrect_references
+	
+	def is_cased_properly(self):
+		""" Checks if the reference is either title or upper cased
+		"""
+		sentence = self.sentence
+		reference = self.gazetteer.name
+		lower_pos = ArticleReference.reference_in_sentence(reference, sentence)
+		upper_pos = ArticleReference.reference_in_sentence(reference, sentence, comparison="upper")
+		title_pos = ArticleReference.reference_in_sentence(reference, sentence, comparison="title")
+		return upper_pos == lower_pos or title_pos == lower_pos
+	
+	def no_near_pronouns(self):
+		""" Returns true if no proper nouns follow or precede the reference
+		"""
+		ne_words = self.ne_sentence_words
+		ne_reference_words = self.ne_reference_words
+		ref_word_count = len(ne_reference_words)
+
+		if len(ne_words) > self.position_in_sentence + ref_word_count + 1 and \
+				not self.followed_by_reference():
+			next_word = self.ne_sentence_words[self.position_in_sentence + ref_word_count]
+			tag = next_word[1]
+			#print "Next word is: %s - %s" % (str(next_word), tag)
+			if tag in ["NP", "NNP"]:
+				return False
+		if self.position_in_sentence - 1 >= 0 and \
+				not self.preceded_by_reference():
+			previous_word = self.ne_sentence_words[self.position_in_sentence - 1]
+			tag = previous_word[1]
+			#print "Previous word is: %s - %s" % (str(previous_word), tag)
+			if tag in ["NP", "NNP"]:
+				return False
+		return True
+
+	def followed_by_reference(self):
+		references = self.references.references
+		for reference in references:
+			if reference.sentence == self.sentence and \
+					reference.position_in_sentence == self.position_in_sentence + self.reference_word_count:
+				return True
+		return False
+
+	def preceded_by_reference(self):
+		references = self.references.references
+		ne_words = self.ne_sentence_words
+
+		for reference in references:
+			if reference.sentence == self.sentence and \
+					reference.position_in_sentence == self.position_in_sentence - 1:
+				return True
+		return False
+	
+	def within_one_std(self):
+		""" Returns true if this reference is within one std of the mean
+		"""
+		if hasattr(self, 'references'):
+			return self.deviation < abs(self.references.std - self.references.mean)
+		else:
+			raise Exception("No references object associated with this ArticleReference")
 
 	@staticmethod
-	def reference_in_sentence(reference, sentence):
+	def reference_in_sentence(reference, sentence, comparison="lower"):
 		""" Finds the position of the reference in a sentence. Consider the special case
 			where the part of the reference may have been joined to another word by the tokenizer
 			because a dash was used. Example "The Kingston-Ochio Rios chapter
 		"""
-		sentence = sentence.lower()
-		reference = reference.lower()
+		if comparison == "lower":
+			sentence = sentence.lower()
+			reference = reference.lower()
+		elif comparison == "title":
+			sentence = sentence.title()
+			reference = reference.title()
+		elif comparison == "upper":
+			sentence = sentence.upper()
+			reference = reference.upper()
 
 		sentence_words = nltk.word_tokenize(sentence)
 		reference_words = nltk.word_tokenize(reference)
@@ -408,15 +801,17 @@ class ArticleReference(models.Model):
 					last_reference_word = reference_words[ref_word_count-1]
 					partial_match = last_reference_word_in_sentence.startswith(last_reference_word) and sentence_words[i:i+ref_word_count-1] == reference_words[:ref_word_count-1]
 			if complete_reference_match:
-				print "[II] Found reference %s in sentence %s at position %s" % (reference, sentence, i)
+				#print "[II] Found reference %s in sentence %s at position %s" % (reference, sentence, i)
 				return i
 			elif partial_match:
-				print "[II] Found reference %s in sentence %s at position %s" % (reference, sentence, i-1)
+				#print "[II] Found reference %s in sentence %s at position %s" % (reference, sentence, i-1)
 				return i
 		return -1
+	
 
 	def __unicode__(self):
-		return "%s found at index %s in %s" % (self.gazetteer.name, self.position, self.location)
+		valid = "valid" if self.valid else "invalid"
+		return "%s found in sentence %s, position %s in %s (%s)" % (self.gazetteer.name, self.sentence_number, self.position_in_sentence, self.location, valid)
 
 	def get_sentence(self):
 		""" Returns the sentence that the reference is contained in
@@ -426,7 +821,6 @@ class ArticleReference(models.Model):
 		else:
 			sentences = article.sentences
 
-	
 	@property
 	def reference_context(self):
 		location = self.location
@@ -452,6 +846,45 @@ class ArticleReference(models.Model):
 			end_index = min(len(body), (self.position + len(name) + 100))
 			end_dots = " ..." if end_index < len(body) else ""
 			return start_dots + body[start_index:self.position] + html + body[self.position + len(name) : end_index] + end_dots
+
+	def add_weight(self, weighting):
+		self.weighting = self.weighting + weighting
+
+	def sub_weight(self, weighting):
+		self.weighting = self.weighting - weighting
+
+	def scale_weight(self, scale):
+		if scale >= 0:
+			self.weighting = self.weighting * scale
+		else:
+			self.weigthing = self.weighting / scale
+
+	def get_centroid(self):
+		return self.gazetteer.point
+
+	def is_valid(self):
+		return self.valid
+	
+	def set_valid(self, valid):
+		self.valid = valid
+	
+	def get_parent(self):
+		""" Gets the parent gazetteer
+		"""
+		return Gazetteer.objects.get(level=1, name=self.gazetteer.parish)
+	
+	def get_parent_weight(self):
+		return self.get_parent().weight
+
+	def is_parent_in_article(self):
+		""" Returns true if a community's parish is mentioned in the article
+		"""
+		parish = Gazetteer.objects.get(level=1, name=self.gazetteer.parish)
+		return self.references.get_occurrences(parish) > 0
+
+	def is_common(self):
+		return self.gazetteer.name.lower() in COMMON_WORDS
+
 
 class GleanerCrawler(Spider):
 	site = "gleaner"
@@ -586,21 +1019,17 @@ def article_created(sender, instance, **kwargs):
 	except NoSocket as e:
 		print "No sockets to send broadcast to :( ... %s" % e
 	
+def get_common_words():
+	data = open("%s/data/common_english_words.txt" % settings.PROJECT_ROOT).read()
+	words = data.splitlines()
+	return words
+COMMON_WORDS = get_common_words()
 
+def get_popular_names():
+	""" Get popular jamaican names
+	"""
+	data = open("%s/data/popular_names.txt" % settings.PROJECT_ROOT).read().lower()
+	names = data.splitlines()
+	names.sort()
+	return names
 
-
-# Add a reference.get_sentence, reference.get_surronding_words, reference.get_pos_tagged 
-# Use NLTK to examine POS of different types of occurrences
-# Build a geo stop word list by virtue of occurrence
-# Add method to get random x articles that haven't been reviewed
-# Find references to Jamaica in the articles reviewed thus far
-# Vary pass mark
-# Find pass mark necessary to achieve F-measure of 0.8. 
-# Vary weightings 
-# Add sentence, sentence_number and position_in_sentence to reference. 
-# Add a review_references page to check over references .... or just add Admin link
-# Review references like "Kingston police division", "Kingston Police Division" and "Arnette Gardens Football team"
-# Also review joined references like "Kingston and St Andrew"
-# Find out how to review tagged locations in NLTK corpus
-# Find popular surnames 
-# Get NLTK classification of word by sentence, index
