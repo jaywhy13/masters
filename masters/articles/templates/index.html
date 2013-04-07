@@ -34,7 +34,7 @@
 		</div>
 		<div class="row">
 			<div class="span4 pull-right controls">
-				<!--<a class="btn pull-right btn-primary review-references">Review References</a>-->
+				<input class="span4" id="inputIcon" type="text">
 			</div>
 		</div>
 		<div class="article-count row"></div>
@@ -45,7 +45,11 @@
 	<script type="text/javascript" src="/static/js/bootstrap.min.js"></script>
 	<script type="text/javascript">
 	$(document).ready(function(){
-		window.setTimeout("nextArticle()", 1200);
+		if(articleId == 0){
+			window.setTimeout("nextArticle()", 1200);
+		} else {
+			window.setTimeout("loadArticle(" + articleId + ")", 1200);
+		}
 	});
 
 	/**
@@ -174,7 +178,7 @@
 
 
 
-	var articleId = 0;
+	var articleId = {{ article_id|default:0 }};
 	var highlightedReference = 0;
 	var articleReferences = {};
 	var articlesClosed = 0;
@@ -191,6 +195,15 @@
 			articlesClosed++;
 			ctx['id'] = articleId;
 		}
+		socket.send(ctx);
+	}
+
+	function loadArticle(articleId){
+		var ctx = {
+			'action' : 'get-article',
+			'id' : articleId
+		};
+		console.log("Loading article: " + articleId);
 		socket.send(ctx);
 	}
 
