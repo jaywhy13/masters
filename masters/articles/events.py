@@ -20,11 +20,16 @@ def handle_subscribe(request, socket, context, channel):
 def handle_message(request, socket, context, message):
 	action = message.get("action", None)
 	print "Processing action: %s" % action
-	if action == "next-article":
-		last_id = cache.get("last_id", 0)
-		print "The last id is %s" % last_id
-		id = message.get("id", last_id)
-		articles = Article.objects.filter(pk__gte=id, reviewed=False).order_by('pk')[:1]
+	if action == "next-article" or action == "get-article":
+		if action == "next-article":
+			last_id = cache.get("last_id", 0)
+			print "The last id is %s" % last_id
+			id = message.get("id", last_id)
+			articles = Article.objects.filter(pk__gte=id, reviewed=False).order_by('pk')[:1]
+		else:
+			id = message.get("id")
+			print "Loading requested id: %s" % id
+			articles = [Article.objects.get(pk=id)]
 		if articles:
 			article = articles[0]
 			# send the article id
