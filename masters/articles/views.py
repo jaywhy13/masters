@@ -25,6 +25,7 @@ def update_reference(request, id, action="confirm"):
 		article_reference.save()
 	elif action == "remove":
 		article_reference.confirmed = True
+		article_reference.valid = False
 		article_reference.save()
 	return HttpResponse("success")
 
