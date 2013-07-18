@@ -23,6 +23,7 @@ def handle_message(request, socket, context, message):
 	if action == "next-article" or action == "get-article":
 		if action == "next-article":
 			last_id = cache.get("last_id", 0)
+			training_set_id = message.get("training_set_id", None)
 			print "The last id is %s" % last_id
 			id = message.get("id", last_id)
 			articles = Article.objects.filter(pk__gte=id, reviewed=False).order_by('pk')[:1]
@@ -32,6 +33,11 @@ def handle_message(request, socket, context, message):
 			articles = [Article.objects.get(pk=id)]
 		if articles:
 			article = articles[0]
+			if training_set_id and action == "next-article":
+				(training_set, created) = TrainingSet.objects.get_or_create(pk=training_set_id)
+				training_set.articles.add(article)
+				training_set.save()
+				print "Added %s to the training set %s" % (article, training_set_id)
 			# send the article id
 			ctx = {
 				'action' : 'next-article',
