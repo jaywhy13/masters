@@ -15,20 +15,34 @@ import re
 import os
 import nltk
 import numpy
+import operator
 
 # Initial Weightings
-PARISH_WEIGHTING = 30
+PARISH_WEIGHTING = 20
 COMMUNITY_WEIGHTING = 10
 # Scoring
 PARISH_PRESENT_WEIGHTING = 15
 COMMON_WEIGHTING = -10
 NOT_LOWER_CASED_WEIGHTING = 5
-NO_NEAR_PRONOUN_WEIGHTING = 10
-WITHIN_ONE_STDEV_WEIGHTING = 15
+NO_NEAR_PRONOUN_WEIGHTING = 20
+WITHIN_ONE_STDEV_WEIGHTING = 10
 NLTK_NE_TAG_WEIGHTING = 10
-PASS_MARK = 30
+PASS_MARK = 35
+# Tests
+PARISH_PRESENT = "PP"
+COMMON = "COM"
+NOT_LOWER_CASED = "NLC"
+NO_NEAR_PRONOUN = "NNP"
+WITHIN_ONE_STDEV = "WOS"
+NLTK_NE = "NE"
+HAS_COMMON_PREFIX = "HCF"
 
-class References:
+TESTS = [PARISH_PRESENT, COMMON, NOT_LOWER_CASED, NO_NEAR_PRONOUN, WITHIN_ONE_STDEV, NLTK_NE, HAS_COMMON_PREFIX]
+
+class References(models.Model):
+
+	class Meta:
+		abstract = True
 
 	references = []
 	occurrences = {} # occurrences of a particular gazetteer
@@ -44,6 +58,30 @@ class References:
 			for article_reference in article_references:
 				self.add_reference(article_reference, False)
 			self.update_distances()
+
+	def __getitem__(self, key):
+		return self.references[key]
+
+	def len(self):
+		return len(self.references)
+
+	@staticmethod
+	def from_article(article):
+		return References(article.article_references.all())
+
+	@staticmethod
+	def from_article_id(article_id):
+		article = Article.objects.get(pk=article_id)
+		return References.from_article(article)
+
+	@staticmethod
+	def from_article_reference(article_reference):
+		return References(article_reference.article.article_references.all())
+
+	@staticmethod
+	def from_article_reference_id(article_reference_id):
+		article_reference = ArticleReference.objects.get(pk=article_reference_id)
+		return References.from_article_reference(article_reference)
 	
 	def remove_failed_references(self):
 		final_references = []
@@ -117,6 +155,14 @@ class References:
 			if article_reference.article == reference.article and article_reference.sentence_number == reference.sentence_number and article_reference.position_in_sentence == reference.position_in_sentence and article_reference.location == reference.location:
 				return reference
 		return None
+
+	def get_reference_by_id(self, article_reference_id):
+		""" Returns the reference for the given id
+		"""
+		for reference in self.references:
+			if reference.pk == article_reference_id:
+				return reference
+		return None
 	
 	def has_reference(self, article_reference):
 		""" Checks if we have a reference to an article reference
@@ -159,8 +205,7 @@ class References:
 		for article_reference in article_references:
 			reference = self.get_reference(article_reference)
 			if reference:
-				if article_reference.valid:
-					found = found + 1
+				found = found + 1
 				if article_reference.valid == self.is_reference_valid(article_reference):
 					correct = correct + 1
 				else:
@@ -170,8 +215,8 @@ class References:
 				if article_reference.valid:
 					print "[WW]  Reference missing for: %s" % article_reference
 		
-		precision = found / float(total_references) if total_references > 0 else 0
-		accuracy = correct / float(references_found) if references_found > 0 else 0
+		precision = correct / float(total_references) if total_references > 0 else 0
+		accuracy = correct / float(found) if found > 0 else 0
 
 		print "[II] Score: Precision: %s, Accuracy: %s" % (precision, accuracy)
 		print "-" * 80
@@ -301,7 +346,7 @@ class Gazetteer(models.Model):
 		article_references = []
 
 		if not articles:
-			articles = Article.objects.filter(article_references=None)
+			articles = Article.objects.filter(reviewed=True) # TODO Change this back to refs=None
 			total = articles.count()
 		else:
 			total = len(articles)
@@ -312,13 +357,15 @@ class Gazetteer(models.Model):
 		amount = 1000 # Loop through by "amount" many articles
 		stop = min(amount, total)
 
-		while stop < total:
+		#print start, stop, amount, total
+
+		while stop <= total:
 			some_articles = articles[start:stop]
 			print "[II] Find references in articles from %s to %s" % (start, stop)
 
 			for article in some_articles:
-				if not batch_mode:
-					print "[II] Searching for references in %s" % article
+
+				print "[II] Searching for references in %s" % article
 				title = article.title.lower()
 				body = article.body.lower()
 				for location in locations:
@@ -363,9 +410,18 @@ control_chars = ''.join(map(unichr, range(0,32) + range(127,160)))
 control_char_re = re.compile('[%s]' % re.escape(control_chars))
 
 def remove_control_chars(s):
-    return control_char_re.sub('', s)
+	if not s:
+		return None
+	return control_char_re.sub('', s)
 
 # Create your models here.
+class TrainingSet(models.Model):
+	articles = models.ManyToManyField("Article", blank=True, null=True, related_name="training_set")
+
+	def add_article(self, article):
+		self.articles.add(article)
+		self.save()
+
 class Article(models.Model):
 	title = models.CharField(max_length=255)
 	body = models.TextField()
@@ -436,7 +492,6 @@ class Article(models.Model):
 				reference.add_weight(NLTK_NE_TAG_WEIGHTING)
 			else:
 				print "[II] - NLTK NE test FAILED for %s" % reference
-
 
 		references.remove_failed_references()
 
@@ -561,27 +616,118 @@ class ArticleReference(models.Model):
 	sentence_number = models.PositiveIntegerField(default=0)
 	position_in_sentence = models.PositiveIntegerField(default=0)
 
+	def evaluate(self, test):
+		# check for references 
+		if not hasattr(self, "references"):
+			raise Exception("No references attrib attached to %s! Cannot evaluate" % self)
+		# check for gazetteer
+		if not self.gazetteer:
+			raise Exception("This reference has no gazetteer object attached!")
+
+		if test in TESTS:
+			if not hasattr(self, "results"):
+				self.results = {}
+				for test_ in TESTS:
+					self.results[test_] = False
+
+			if test == COMMON:
+				result = self.is_common()
+			elif test == PARISH_PRESENT:
+				result = self.is_parent_in_article()
+			elif test == NOT_LOWER_CASED:
+				result = self.is_cased_properly()
+			elif test == NO_NEAR_PRONOUN:
+				result = self.no_near_pronouns()
+			elif test == WITHIN_ONE_STDEV:
+				result = self.within_one_std()
+			elif test == NLTK_NE:
+				result = self.is_nltk_ne
+			elif test == HAS_COMMON_PREFIX:
+				result = self.has_common_prefix()
+			else:
+				raise Exception("No clause added for test: %s in reference.evaluate" % test)
+			self.results[test] = result
+			return result
+		else:
+			raise Exception("Unknown test %s" % test)
+
 	@staticmethod
 	def get_reference():
 		""" Gets a reviewed reference
 		"""
 		return ArticleReference.objects.filter(confirmed=True).latest('pk')
 
+	def get_ne_words_after(self, amount=3):
+		""" Returns amoutn words after our reference word
+		"""
+		ne_words = self.ne_sentence_words
+		start = self.position_in_sentence + self.reference_word_count
+		end = start + amount
+		return ne_words[start:end]
+
 	def get_words_after(self, amount=3):
 		""" Returns amoutn words after our reference word
 		"""
-		sentence_words = self.sentence_words
-		start = self.position_in_sentence + 1
-		end = self.position_in_sentence + amount
-		return sentence_words[start:end]
-	
+		ne_words = self.sentence_words
+		start = self.position_in_sentence + self.reference_word_count
+		end = start + amount
+		return ne_words[start:end]
+
+	def get_ne_words_before(self, amount=3):
+		""" Returns amount words before our reference word
+		""" 
+		sentence_words = self.ne_sentence_words
+		start = self.position_in_sentence - amount
+		end = self.position_in_sentence
+		result = sentence_words[start:end]
+		result.reverse()
+		return result
+
 	def get_words_before(self, amount=3):
 		""" Returns amount words before our reference word
 		""" 
 		sentence_words = self.sentence_words
 		start = self.position_in_sentence - amount
 		end = self.position_in_sentence
-		return sentence_words[start:end]
+		result = sentence_words[start:end]
+		result.reverse()
+		return result
+
+	@property
+	def word_before(self):
+		words = self.get_words_before(amount=1)
+		if words:
+			return words[0]
+		return None
+
+	def has_common_prefix(self):
+		""" Returns true if the word that comes before is our list 
+			of common words that precede valid reference
+		"""
+		if self.word_before:
+			return self.word_before.lower() in COMMON_PREFIXES[:30]
+
+	@property
+	def word_after(self):
+		words = self.get_words_after(amount=1)
+		if words:
+			return words[0]
+		return None
+
+	@property
+	def ne_word_before(self):
+		words = self.get_ne_words_before(amount=1)
+		if words:
+			return words[0]
+		return None
+
+	@property
+	def ne_word_after(self):
+		words = self.get_ne_words_after(amount=1)
+		if words:
+			return words[0]
+		return None
+
 
 	@property
 	def sentence_words(self):
@@ -695,6 +841,7 @@ class ArticleReference(models.Model):
 						if position_in_sentence > -1:
 							self.position_in_sentence = position_in_sentence
 							self.sentence_number = before
+							print "[II] Updated position to sentence %s, position %s" % (self.sentence_number, self.position_in_sentence)
 							self.save()
 					break
 
@@ -720,7 +867,58 @@ class ArticleReference(models.Model):
 		upper_pos = ArticleReference.reference_in_sentence(reference, sentence, comparison="upper")
 		title_pos = ArticleReference.reference_in_sentence(reference, sentence, comparison="title")
 		return upper_pos == lower_pos or title_pos == lower_pos
-	
+
+	def followed_by_words(self, words):
+		amount =  len(words)
+		words_after = self.get_words_after(amount=amount)
+		return words_after == words
+
+	def followed_by_ne(self):
+		return self.ne_word_after
+
+	def preceded_by_ne(self):
+		return self.ne_word_before
+
+	@property
+	def followed_by_apos(self):
+		return self.word_after == "'s"
+
+	def is_part_of_a_reference(self):
+		""" Returns true if our word is a part of another reference. For example
+			"Kingston" in "New Kingston". Kingston is a part of the New Kingston 
+			reference.
+		"""
+		for reference in self.references:
+			if reference == self or self.position_in_sentence == reference.position_in_sentence:
+				continue
+			if reference.sentence == self.sentence:
+				my_start_index = self.position_in_sentence
+				my_end_index = my_start_index + self.reference_word_count
+				word_start_index = reference.position_in_sentence
+				word_end_index = word_start_index + reference.reference_word_count
+
+				if my_start_index >= word_start_index and my_end_index <= word_end_index:
+					return True
+		return False
+
+	def is_part_of_ne(self):
+		""" Returns true if our reference word is apart of a named entity
+		"""
+		if self.ne_word_before:
+			return self.ne_word_before[1] in ["NP", "NNP"]
+		if self.ne_word_after:
+			return self.ne_word_after[1] in ["NP", "NNP"]
+
+	def reference_exists_at(self, position, sentence_number=None):
+		if sentence_number:
+			sentence = self.get_sentence(sentence_number)
+		else:
+			sentence = self.sentence
+		for reference in self.references:
+			if reference.sentence == sentence:
+				return reference.position_in_sentence == position
+		return False
+
 	def no_near_pronouns(self):
 		""" Returns true if no proper nouns follow or precede the reference
 		"""
@@ -728,20 +926,81 @@ class ArticleReference(models.Model):
 		ne_reference_words = self.ne_reference_words
 		ref_word_count = len(ne_reference_words)
 
-		if len(ne_words) > self.position_in_sentence + ref_word_count + 1 and \
-				not self.followed_by_reference():
-			next_word = self.ne_sentence_words[self.position_in_sentence + ref_word_count]
-			tag = next_word[1]
-			#print "Next word is: %s - %s" % (str(next_word), tag)
-			if tag in ["NP", "NNP"]:
+		ne_word_after = self.ne_word_after
+		ne_word_before = self.ne_word_before
+
+		# Keep track of some variables
+		followed_by_reference = self.followed_by_reference()
+		preceded_by_reference = self.preceded_by_reference()
+		followed_by_apos = self.followed_by_apos
+		followed_by_ne = ne_word_after		
+		preceded_by_ne = ne_word_before
+		word_after = self.word_after
+		word_before = self.word_before
+
+		word_after_title_cased = is_title_cased(word_after)
+		word_before_title_cased = is_title_cased(word_before)
+
+		#print " NE Before: %s, After: %s" % (ne_word_before, ne_word_after)
+		#print " Reference before?: %s, Reference after? %s" % (self.preceded_by_reference(), 
+		#	self.followed_by_reference())
+
+		if word_after_title_cased and not followed_by_reference:
+			if ne_word_after[1] not in ["DT", "IN"]:
+				#print "%s comes after, is title cased and it's not a reference" % word_after
 				return False
-		if self.position_in_sentence - 1 >= 0 and \
-				not self.preceded_by_reference():
-			previous_word = self.ne_sentence_words[self.position_in_sentence - 1]
-			tag = previous_word[1]
+
+		if word_before_title_cased and not preceded_by_reference:
+			if ne_word_before[1] not in ["DT", "IN"]:
+				#print "%s comes before, is title cased and it's not a reference" % word_before
+				return False
+
+		# Apostrophe testing...
+		if followed_by_apos:
+			# Get the word after the apos
+			ne_word_after_apos = self.get_ne_words_after(2)[1:][0]
+			(word, pos_tag, ne_tag) = ne_word_after_apos
+			if is_title_cased(word) and not ne_tag and pos_tag in ["NNP", "NP"]:
+				#print " %s (%s, %s) follows as a titled cased, non-NE word" % (word, pos_tag, ne_tag)
+				return False
+
+		# If NLTK thinks the word is ORGANIZATION and we are followed by 'of the'
+		if reduce(operator.and_, [ ne_reference_word[2] == "ORGANIZATION" for \
+			ne_reference_word in ne_reference_words ]):
+			if self.followed_by_words(["of", "the"]):
+				#print " The words \"of the\" follow our reference... this can't be valid"
+				return False
+			if self.followed_by_words(["of"]):
+				if not self.reference_exists_at(self.position_in_sentence + \
+					self.reference_word_count + 1):
+					# examine the word more carefully... its not a reference...
+					ne_word = self.get_ne_words_after(2)[1:][0]
+					(word, pos_tag, ne_tag) = ne_word
+					if is_title_cased(word):
+						#print " Our referenced is suffixed by \"of %s\", we think its not valid" % \
+						#	(word)
+						return False
+
+		# If we are PART of a reference... nope nope nope... can't work...
+		if self.is_part_of_a_reference():
+			#print " Our word is part of a reference... this cannot be valid"
+			return False
+
+
+		if ne_word_after and not self.followed_by_reference():
+			tag = ne_word_after[1]
+			node = ne_word_after[2]
+			if tag in ["NP", "NNP"] or node != None:
+				#print " Word after %s is a pronoun and not a reference" % ne_word_after[0]
+				pass
+
+		if ne_word_before and not self.preceded_by_reference():
+			tag = ne_word_before[1]
+			node = ne_word_before[2]
 			#print "Previous word is: %s - %s" % (str(previous_word), tag)
-			if tag in ["NP", "NNP"]:
-				return False
+			if tag in ["NP", "NNP"] or node != None:
+				#print " Word before %s is a pronoun and not a reference" % ne_word_before[]
+				pass #return False
 		return True
 
 	def followed_by_reference(self):
@@ -750,6 +1009,9 @@ class ArticleReference(models.Model):
 			if reference.sentence == self.sentence and \
 					reference.position_in_sentence == self.position_in_sentence + self.reference_word_count:
 				return True
+		# Check for Jamaica
+		if self.word_after and self.word_after.lower() == "jamaica":
+			return True
 		return False
 
 	def preceded_by_reference(self):
@@ -760,13 +1022,16 @@ class ArticleReference(models.Model):
 			if reference.sentence == self.sentence and \
 					reference.position_in_sentence == self.position_in_sentence - 1:
 				return True
+		# Check for Jamaica
+		if self.word_before and self.word_before.lower() == "jamaica":
+			return True
 		return False
 	
 	def within_one_std(self):
 		""" Returns true if this reference is within one std of the mean
 		"""
 		if hasattr(self, 'references'):
-			return self.deviation < abs(self.references.std - self.references.mean)
+			return self.deviation <= abs(self.references.std - self.references.mean)
 		else:
 			raise Exception("No references object associated with this ArticleReference")
 
@@ -879,8 +1144,27 @@ class ArticleReference(models.Model):
 	def is_parent_in_article(self):
 		""" Returns true if a community's parish is mentioned in the article
 		"""
-		parish = Gazetteer.objects.get(level=1, name=self.gazetteer.parish)
-		return self.references.get_occurrences(parish) > 0
+		occurrences = 0
+		if self.gazetteer.level == 1:
+			return False
+		else:
+			if self.gazetteer.parish.startswith("St"):
+				parish_names = [self.gazetteer.parish]
+				if self.gazetteer.parish.startswith("St. "):
+					parish_names.append(self.gazetteer.parish.replace("St. ", "St "))
+				else:
+					parish_names.append(self.gazetteer.parish.replace("St ", "St. "))
+				print "Will filter for %s" % parish_names
+				parishes = Gazetteer.objects.filter(level=1, name__in=parish_names)
+				for parish in parishes:
+					occurrences += self.references.get_occurrences(parish)
+				return occurrences > 0
+			else:
+				try:
+					parish = Gazetteer.objects.get(level=1, name=self.gazetteer.parish)
+				except Gazetteer.DoesNotExist:
+					return False
+				return self.references.get_occurrences(parish) > 0
 
 	def is_common(self):
 		return self.gazetteer.name.lower() in COMMON_WORDS
@@ -1025,6 +1309,12 @@ def get_common_words():
 	return words
 COMMON_WORDS = get_common_words()
 
+def get_common_prefixes():
+	data = open("%s/data/words_before.txt" % settings.PROJECT_ROOT).read()
+	words = data.splitlines()
+	return words
+COMMON_PREFIXES = get_common_prefixes()
+
 def get_popular_names():
 	""" Get popular jamaican names
 	"""
@@ -1033,3 +1323,37 @@ def get_popular_names():
 	names.sort()
 	return names
 
+def is_title_cased(word):
+	if not word:
+		return False
+	if not re.findall("[a-z]",word):
+		return False
+	return word.title() == word
+
+def get_sentence_for(article_reference_id):
+	try:
+		ref = ArticleReference.objects.get(pk=article_reference_id)
+		return ref.sentence
+	except ArticleReference.DoesNotExist:
+		return None
+
+def get_reference(article_reference_id):
+	try:
+		refs = References.from_article_reference_id(article_reference_id)
+		return refs.get_reference_by_id(article_reference_id)
+	except ArticleReference.DoesNotExist:
+		return None
+
+def get_ne_words(str):
+	pos_words = nltk.pos_tag(nltk.word_tokenize(str))
+	ne_chunks = nltk.ne_chunk(pos_words)
+	result = []
+	# Loop and extract
+	for ne_chunk in ne_chunks:
+		if hasattr(ne_chunk, 'node'):
+			node = ne_chunk.node
+			for (word, tag) in ne_chunk:
+				result.append((word, tag, node))
+		else:
+			result.append((ne_chunk[0], ne_chunk[1], None))
+	return result

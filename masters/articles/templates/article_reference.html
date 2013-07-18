@@ -2,12 +2,12 @@
 	<div class="span10 article-reference-description">
 	{{ article_reference.description|safe }}
 	</br>
-	Sentence {{ article_reference.sentence_number }}, Position: {{ article_reference.position_in_sentence }}
+	Ref: <b>{{ article_reference.pk }}</b>, Sentence {{ article_reference.sentence_number }}, Position: {{ article_reference.position_in_sentence }}
 	</br>
 	<div class="span6 article-reference-controls pull-right">
 		<span class="article-reference-text">Is this refence to <b>{{  article_reference.gazetteer }}</b> correct?</span>
 		<div class="article-reference-buttons">
-			<a class="btn btn-normal {% if article_reference.confirmed and article_reference.valid %}btn-warning{% endif %}" id="confirm-reference-{{ article_reference.pk }}">Yes</a>
+			<a class="btn btn-normal {% if article_reference.confirmed and article_reference.valid %}btn-success{% endif %}" id="confirm-reference-{{ article_reference.pk }}">Yes</a>
 			<a class="btn btn-normal {% if article_reference.confirmed and not article_reference.valid %}btn-warning{% endif %}" id="remove-reference-{{ article_reference.pk }}">No</a>
 			<a class="btn btn-normal" id="context-reference-{{ article_reference.pk }}">View Context</a>
 		</div>

@@ -22,7 +22,7 @@
 	</head>
 	<body>
 
-	<div class="container">
+	<div class="container container-fluid">
 		<div class="navbar">
 			<div class="navbar-inner">
 			    <a class="brand" href="#">Crawler Hub</a>
@@ -34,7 +34,7 @@
 		</div>
 		<div class="row">
 			<div class="span4 pull-right controls">
-				<input class="span4" id="inputIcon" type="text">
+				<a class="btn btn-primary next-article-btn">Next Article</a>
 			</div>
 		</div>
 		<div class="article-count row"></div>
@@ -50,6 +50,10 @@
 		} else {
 			window.setTimeout("loadArticle(" + articleId + ")", 1200);
 		}
+
+		$(".next-article-btn").click(function(){
+			nextArticle();
+		});
 	});
 
 	/**
@@ -101,7 +105,7 @@
 		var setupButtons = function(){
 			console.log("Setting up buttons for ref=" + id);
 			$("#confirm-reference-" + id).click(function(){
-				$(this).addClass("btn-warning");
+				$(this).addClass("btn-success");
 				confirmReference(id);
 			});
 
@@ -113,10 +117,23 @@
 			$("#context-reference-" + id).click(function(){
 				showPreview(contextReferenceUrl);
 			});
+
+			// Update our confirmations...
+			$("#confirm-reference-" + id + ".btn-success").each(function(index){
+				reference["status"] = "confirmed";
+			});
+
+			$("#remove-reference-" + id + ".btn-warning").each(function(index){
+				reference["status"] = "removed";
+			});
+
 		};
 		var reference = articleReferences[id];
 		var url = reference["url"];
 		$("<div class='article-reference'>").load(url, setupButtons).appendTo(".article-references").fadeIn("slow");
+
+		// Update our reference information if the reference is selceted...
+
 	}
 
 	/**
@@ -172,12 +189,12 @@
 				return; 
 			}
 		}
-		nextArticle(); // Load the next article
+		window.setTimeout("nextArticle()", 3000);
 	}
 
 
 
-
+	var trainingSetId = {{ training_set_id|default:"null"}};
 	var articleId = {{ article_id|default:0 }};
 	var highlightedReference = 0;
 	var articleReferences = {};
@@ -194,6 +211,10 @@
 			socket.send({'action' : 'close-article', 'id':articleId});
 			articlesClosed++;
 			ctx['id'] = articleId;
+		}
+
+		if(trainingSetId){
+			ctx["training_set_id"] = trainingSetId;
 		}
 		socket.send(ctx);
 	}

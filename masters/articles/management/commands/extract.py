@@ -15,6 +15,12 @@ class Command(BaseCommand):
             default=100,
             metavar="LIMIT",
             help='Extracts blah'),
+        make_option('--training-set',
+            action='store',
+            dest='training_set',
+            default=None,
+            help='Limits articles to a training set'),
+
         )
 
     def handle(self, *args, **options):
@@ -29,20 +35,30 @@ class Command(BaseCommand):
         ctx = {
         "reviewed" : True,
         }
+
+        training_set_id = options["training_set"]
+        if training_set_id:
+            print "Confining article to training set: %s" % training_set_id
+            training_set = TrainingSet.objects.get(pk=training_set_id)
+            ctx.update(dict(training_set=training_set))
+
         if ids:
             ctx.update(dict(pk__in=ids))
 
         precision_values = []
         accuracy_values = []
 
+
     	articles = Article.objects.filter(**ctx).order_by("-pk")[:limit]
         count = 0
+        ref_count = 0
     	for article in articles:
             if not article.has_valid_references():
                 continue
             count += 1
             try:
                (precision, accuracy) = Article.extract_references(article)
+               ref_count += article.article_references.filter(valid=True).count()
                precision_values.append(precision)
                accuracy_values.append(accuracy)
                print "[II] Current precision: %s, accuracy: %s after %s articles" % (numpy.array(precision_values).mean(), numpy.array(accuracy_values).mean(), count)
