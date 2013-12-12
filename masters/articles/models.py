@@ -274,74 +274,11 @@ class Gazetteer(models.Model):
 	# Use these to load in data for country, parish and community
 	# Gazetteer.objects.create(name='Jamaica', geom=GEOSGeometry('POINT (-77.5 18.25)'), level=0, weighting=80)
 
-
-
-	@staticmethod
-	def refine_references():
-		total = ArticleReference.objects.count()
-		start = 0
-		amount = 1000
-		stop = min(amount, total)
-		refined = 0
-		reference_ids = []
-
-		while stop < total:
-
-			print "[II] Refining references between %s and %s" % (start, stop)
-			if refined:
-				import time
-				print "[II] %s article references refined thus far" % refined
-				print
-
-
-			article_references = ArticleReference.objects.all()[start:stop]
-			reference_ids = []
-			for article_reference in article_references:
-				article = article_reference.article
-				gazetteer = article_reference.gazetteer
-				position = article_reference.position
-				content = article.body if article_reference.location == "body" else article.title
-
-				start = max(0, position - 50)
-				end = min(len(content), position + len(gazetteer.name) + 50)
-
-				# Do a title case comparison
-				context = content[start:end].replace("\n","")
-
-				# Check if it's a word boundary
-
-				if not Gazetteer.is_valid_reference(gazetteer.name, position, content):
-					print "[II] Removing non-title-cased reference to **%s** in %s of %s\n\tContext: %s" % (gazetteer.name.title(), article_reference.location, article.title, context)
-					refined += 1
-					reference_ids.append(article_reference.pk)
-			if reference_ids:
-				ArticleReference.objects.filter(pk__in=reference_ids).delete()
-			start = stop + 1
-			stop = stop + amount
-		print "[II] Refined %s articles in total" % refined
-
-	@staticmethod
-	def is_valid_reference(name, position, content):
-		start = max(0, position - 2)
-		end = min(len(content), position + len(name) + 2)
-		context = content[start:end].replace("\n","")
-		word_in_context = content[position:len(name) + position]
-		# Check if it's a word boundary
-		start = max(0, position - 2)
-		end = min(len(content), position + len(name) + 2)
-		boundary_context = content[start:end]
-
-		start = max(0, position - 10)
-		stop = min(len(content), position + len(name) + 10) 
-		wide_context = content[start:end]
-
-		is_word_boundary = re.search(r"\b%s\b" % name, boundary_context, re.I)
-		is_title_cased = name.title() == word_in_context
-		return is_word_boundary and is_title_cased
-
 	@staticmethod
 	def find_references(articles=None):
-		""" Searches articles for references to Gazetteer entries and return article references
+		""" Searches articles for references to Gazetteer entries and return article references. 
+			This is a naive search that just checks for equality. These have to be 
+			confirmed manually later.
 		""" 
 		article_references = []
 
@@ -366,34 +303,35 @@ class Gazetteer(models.Model):
 			for article in some_articles:
 
 				print "[II] Searching for references in %s" % article
-				title = article.title.lower()
-				body = article.body.lower()
+				title = article.title
+				title_words = get_ne_words(title)
+				body = article.body
+				sentences = sent_tokenize(body)
+
 				for location in locations:
 					name = location.name.strip().lower()
 					if not name:  # ignore blank names
 						continue
 
 					# search for a name in the title...
-					position = title.find(name)
-					while position > -1:
-						if Gazetteer.is_valid_reference(name, position, article.title):
-							(article_reference, created) = ArticleReference.objects.get_or_create(article=article, 
-								gazetteer=location, position=position, location="title")
-							if created:
-								print "[II] Found reference to %s in title of %s" % (name, title)
-						position = title.find(name, position+1)
+					positions = [ position for (position, (value, tag, foo)) in enumerate(title_words) if value.lower() == name ]
+					for position in positions:
+						(article_reference, created) = ArticleReference.objects.get_or_create(article=article, 
+							gazetteer=location, position=position, location="title")
+						if created:
+							print "[II]  Found reference to %s in title of %s" % (name, title)
 						article_references.append(article_reference)
 					
 					# search for a name in the body..
-					position = body.find(name)
-					while position > -1:
-						if Gazetteer.is_valid_reference(name, position, article.body):
-							(article_reference, created) = ArticleReference.objects.get_or_create(article=article, 
-								gazetteer=location, position=position, location="body")
-							if created:
-								print "[II] Found reference to %s in body of %s" % (name, title)
-						position = body.find(name, position+1)
-						article_references.append(article_reference)
+					for sentence_number, sentence in enumerate(sentences):
+						sentence_words = get_ne_words(sentence)
+						for (word_number, (word, tag, foo)) in enumerate(sentence_words):
+							if word.lower() == name:
+								(article_reference, created) = ArticleReference.objects.get_or_create(article=article, 
+									gazetteer=location, position=word_number, location="body", sentence_number=sentence_number)
+								if created:
+									print "[II]  Found reference to %s in body of %s" % (name, title)
+								article_references.append(article_reference)
 			print "[II] Found a total of %s article references" % len(article_references)
 			start = stop + 1
 			stop = stop + amount
@@ -615,6 +553,18 @@ class ArticleReference(models.Model):
 	valid = models.BooleanField(default=False)
 	sentence_number = models.PositiveIntegerField(default=0)
 	position_in_sentence = models.PositiveIntegerField(default=0)
+
+
+	def extract_features(self):
+		features = {
+			PARISH_PRESENT : self.is_parent_in_article(),
+			NOT_LOWER_CASED : self.is_cased_properly(),
+			NO_NEAR_PRONOUN : self.no_near_pronouns(),
+			WITHIN_ONE_STDEV : self.within_one_std(),
+			HAS_COMMON_PREFIX : self.has_common_prefix(),
+			NLTK_NE : self.is_nltk_ne
+		}
+		return features
 
 	def evaluate(self, test):
 		# check for references 
