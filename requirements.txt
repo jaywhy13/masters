@@ -1,5 +1,5 @@
 BeautifulSoup==3.2.1
-Django==1.4.1
+Django==1.6
 Pattern==2.5
 South==0.7.6
 django-appconf==0.6
