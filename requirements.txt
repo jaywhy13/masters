@@ -1,14 +1,20 @@
 BeautifulSoup==3.2.1
 Django==1.6
 Pattern==2.5
+PyYAML==3.10
 South==0.7.6
+argparse==1.2.1
+distribute==0.6.24
 django-appconf==0.6
 django-extensions==1.1.1
--e git+git@github.com:jaywhy13/django-socketio.git@530d8f81e3fd2a78740a1ba68522b6ea498b8d14#egg=django_socketio-dev
+-e git+https://github.com/jaywhy13/django-socketio.git@530d8f81e3fd2a78740a1ba68522b6ea498b8d14#egg=django_socketio-dev
 gevent==0.13.8
 gevent-socketio==0.2.1
 gevent-websocket==0.3.6
 greenlet==0.4.0
+nltk==2.0.4
+numpy==1.8.0
+psycopg2==2.5.1
 python-memcached==1.48
 six==1.2.0
 sphinx-me==0.1.2
